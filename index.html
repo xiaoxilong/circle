@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Circle Studio · 圆形画布</title>
+<style>
+  /* ========== 基础 ========== */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    font-size: 13px; color: #1f2328; background: #f5f6f8;
+    display: flex; flex-direction: column; overflow: hidden; user-select: none;
+  }
+  .hidden { display: none !important; }
+
+  /* 脚本自检横幅：JS 正常运行后由 init() 移除；一直显示 = 当前环境不运行脚本（如微信文件预览） */
+  #jsWarn {
+    position: fixed; left: 0; right: 0; top: 0; z-index: 9999;
+    background: #dc2626; color: #fff; font-size: 12px;
+    padding: 8px 12px; text-align: center; line-height: 1.8;
+  }
+  #jsWarn a { color: #ffe4e4; text-decoration: underline; word-break: break-all; }
+
+  /* ========== 顶栏 ========== */
+  #topbar {
+    height: 48px; flex: none; background: #fff; border-bottom: 1px solid #e5e7eb;
+    display: flex; align-items: center; gap: 16px; padding: 0 16px; z-index: 10;
+  }
+  .logo { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; }
+  .logo-dot {
+    width: 14px; height: 14px; border-radius: 50%;
+    background: conic-gradient(from 20deg, #ef4444, #f59e0b, #10b981, #2563eb, #8b5cf6, #ef4444);
+  }
+  .toolbar { display: flex; gap: 8px; margin-left: auto; }
+  button {
+    font: inherit; border: 1px solid #d5d9e0; background: #fff; color: #1f2328;
+    padding: 5px 12px; border-radius: 7px; cursor: pointer;
+    transition: background .12s, border-color .12s;
+  }
+  button:hover { background: #f2f4f7; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.danger { color: #dc2626; border-color: #f3c1c1; }
+  button.danger:hover { background: #fef2f2; }
+  .count { color: #6b7280; }
+  #verBadge { font-size: 10px; color: #c3c9d4; font-weight: 400; }
+  #diag { display: none; }
+
+  /* ========== 主体布局 ========== */
+  #main { flex: 1; display: flex; min-height: 0; position: relative; }
+
+  /* ========== 左侧组件栏 ========== */
+  #sidebar {
+    width: 216px; flex: none; background: #fbfcfd; border-right: 1px solid #e5e7eb;
+    padding: 14px; overflow-y: auto;
+  }
+  .panel-title {
+    font-size: 11px; font-weight: 600; color: #6b7280;
+    letter-spacing: .08em; margin-bottom: 10px;
+  }
+  #trayToggle { display: none; }   /* 手机端专用 */
+  .comp-card {
+    background: #fff; border: 1px solid #e2e6eb; border-radius: 10px;
+    padding: 12px; margin-bottom: 10px;
+    display: flex; align-items: center; gap: 10px;
+    cursor: grab;
+    touch-action: pan-x;   /* 手机上：横向滑动滚动组件栏，纵向拖出放入画布 */
+    transition: border-color .15s, box-shadow .15s, transform .15s;
+  }
+  .comp-card:hover {
+    border-color: #2563eb; box-shadow: 0 4px 12px rgba(37, 99, 235, .12); transform: translateY(-1px);
+  }
+  .comp-card:active { cursor: grabbing; }
+  .preview-slot { width: 44px; flex: none; display: flex; justify-content: center; }
+  .comp-preview { border-radius: 50%; flex: none; }
+  .comp-info { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .comp-name { font-size: 12.5px; color: #1f2328; }
+  .comp-sub { font-size: 11px; color: #9ca3af; }
+  .custom-row { display: flex; align-items: center; gap: 6px; }
+  .custom-row input {
+    width: 64px; padding: 3px 6px; border: 1px solid #d5d9e0;
+    border-radius: 6px; font: inherit; background: #fff;
+  }
+  .custom-row input:focus { outline: none; border-color: #2563eb; }
+  .unit { color: #9ca3af; font-size: 11px; }
+  .sidebar-hint { margin-top: 10px; font-size: 11px; line-height: 1.9; color: #9ca3af; text-align: center; }
+
+  /* ========== 中间画布 ========== */
+  #canvasScroll { flex: 1; overflow: auto; background: #e8eaef; position: relative; }
+  #board {
+    width: 2400px; height: 1600px; background-color: #fff; position: relative;
+    touch-action: manipulation;   /* 触摸：允许拖动平移画布，禁用双击放大页面 */
+    background-image: radial-gradient(circle, #d4d9e0 1.2px, transparent 1.3px);
+    background-size: 24px 24px;
+  }
+  .shape { position: absolute; border-radius: 50%; cursor: move; z-index: 1; touch-action: none; }
+
+  /* ========== 选中框（仅高亮，尺寸不可修改） ========== */
+  #selectionBox {
+    position: absolute; border: 1.5px dashed #2563eb; border-radius: 50%;
+    pointer-events: none; z-index: 5;
+  }
+
+  /* ========== 自动贴近参考线 ========== */
+  .guide { position: absolute; z-index: 4; pointer-events: none; }
+  #guideH { left: 0; right: 0; height: 0; border-top: 1px dashed #f43f5e; }
+  #guideV { top: 0; bottom: 0; width: 0; border-left: 1px dashed #f43f5e; }
+  .shape.snap-target { box-shadow: 0 0 0 3px rgba(244, 63, 94, .30); }
+
+  /* ========== 拖拽幻影 ========== */
+  #dragGhost {
+    position: fixed; width: 48px; height: 48px; border-radius: 50%;
+    background: rgba(37, 99, 235, .25); border: 2px dashed #2563eb;
+    transform: translate(-50%, -50%); pointer-events: none; z-index: 999;
+  }
+
+  /* ========== 右侧浮动属性面板 ========== */
+  #props {
+    position: absolute; right: 16px; top: 14px; width: 228px; background: #fff;
+    border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px; z-index: 20;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, .10);
+    display: flex; flex-direction: column; gap: 13px;
+  }
+  .props-title { font-weight: 600; font-size: 13px; display: flex; justify-content: space-between; align-items: center; }
+  .muted { color: #9ca3af; font-weight: 400; font-size: 11px; }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field > label {
+    font-size: 11px; color: #6b7280; font-weight: 600;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .row { display: flex; align-items: center; gap: 8px; }
+  input[type="number"] {
+    width: 72px; padding: 4px 6px; border: 1px solid #d5d9e0;
+    border-radius: 6px; font: inherit; background: #fff;
+  }
+  input[type="number"]:focus { outline: none; border-color: #2563eb; }
+  .mini { font-size: 11px; color: #6b7280; }
+  .size-display {
+    display: flex; align-items: center; gap: 8px;
+    background: #f5f6f8; border-radius: 8px; padding: 7px 10px;
+    color: #374151; font-size: 13px;
+  }
+  .dot { width: 14px; height: 14px; border-radius: 50%; flex: none; }
+  .btn-row { display: flex; gap: 8px; }
+  .btn-row button { flex: 1; }
+
+  /* ========== 底部状态栏 ========== */
+  #statusbar {
+    height: 28px; flex: none; background: #fff; border-top: 1px solid #e5e7eb;
+    display: flex; align-items: center; justify-content: space-between; padding: 0 14px;
+    font-size: 11px; color: #9ca3af;
+  }
+
+  /* ========== 移动端适配（≤768px，纯 CSS、不依赖 JS） ==========
+     布局只靠 media query 生效：即使微信「文件预览」这类不运行脚本的环境，
+     外观也是正确的。（<head> 里的 html.mobile 类仅供 JS 逻辑判断，不影响样式。） */
+  @media (max-width: 768px) {
+    body { touch-action: pan-x pan-y; }   /* 禁用双指缩放 */
+    #topbar { gap: 8px; padding: 0 10px; }
+    .logo { font-size: 0; }                     /* 只留彩色圆点logo */
+    .logo-dot { width: 18px; height: 18px; }
+    .count { display: none; }
+    button { padding: 8px 12px; }               /* 加大触摸目标 */
+    #statusbar { display: none; }               /* 手机上隐藏状态栏，空间留给画布 */
+
+    /* 布局改为纯文档流：画布在上自动填满，组件栏在下贴底 */
+    #main { flex-direction: column; }
+    #canvasScroll { order: 1; min-height: 0; }
+    #sidebar {
+      order: 2; flex: none; width: 100%;
+      background: #fbfcfd; border-right: none; border-top: 1px solid #e5e7eb;
+      box-shadow: 0 -4px 16px rgba(15, 23, 42, .08);
+      padding: 0 10px 10px;
+      padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    }
+    #trayToggle {
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+      height: 40px; font-size: 12.5px; font-weight: 600; color: #4b5563;
+      cursor: pointer; user-select: none; touch-action: manipulation;
+    }
+    #trayToggle:active { background: #f2f4f7; }
+    #trayVer { font-size: 10px; color: #c3c9d4; font-weight: 400; margin-left: 2px; }
+    /* 诊断条：版本 / 视口 / 媒体查询 / mobile类 / 事件计数 / JS错误 */
+    #diag {
+      display: block; position: absolute; left: 8px; top: 8px; z-index: 40;
+      font-size: 10px; color: #6b7280; background: rgba(255, 255, 255, .92);
+      border: 1px solid #e5e7eb; border-radius: 6px; padding: 4px 8px;
+      pointer-events: none; max-width: 75%; line-height: 1.6;
+    }
+    #trayChevron { color: #9ca3af; font-size: 11px; transition: transform .25s ease; }
+    body.tray-collapsed #trayCards { display: none; }   /* 收起 = 直接隐藏卡片区，标题栏常驻 */
+    body.tray-collapsed #trayChevron { transform: rotate(180deg); }
+    .panel-title, .sidebar-hint { display: none; }
+    /* 卡片区：横向排列，可左右滑动 */
+    #trayCards {
+      display: flex; align-items: stretch; gap: 8px;
+      overflow-x: auto; padding: 0 0 2px;
+      -webkit-overflow-scrolling: touch;         /* 微信/iOS 惯性滚动 */
+    }
+    .comp-card { flex: none; flex-direction: column; gap: 6px; margin-bottom: 0; padding: 10px 12px; }
+    .comp-info { align-items: center; }
+    .preview-slot { width: auto; min-width: 44px; }
+
+    /* 属性面板：手机端压缩成画布顶部一条细横栏（约 40px 高），
+       隐藏面板标题和字段标签，只留 颜色+尺寸 / X / Y / 复制 / 删除。 */
+    #props {
+      left: 6px; right: 6px; width: auto; top: 32px;
+      flex-direction: row; align-items: center; flex-wrap: wrap;
+      gap: 6px; padding: 6px 8px; border-radius: 10px; font-size: 11px;
+    }
+    .props-title { display: none; }
+    .field { flex-direction: row; align-items: center; gap: 4px; }
+    .field > label { display: none; }
+    .size-display { padding: 3px 8px; gap: 5px; font-size: 11px; border-radius: 6px; }
+    .dot { width: 10px; height: 10px; }
+    .row { gap: 4px; }
+    input[type="number"] { width: 54px; padding: 2px 4px; font-size: 11px; }
+    .mini { font-size: 10px; }
+    .btn-row { gap: 6px; }
+    .btn-row button { flex: none; padding: 3px 10px; font-size: 11px; }
+  }
+</style>
+<script>
+// 手机判定（渲染前同步执行）：给 <html> 加 mobile 类，仅供 JS 逻辑判断用
+// （诊断条 CL 指示）。布局样式不依赖它 —— 走 CSS media query，无 JS 也有正确外观。
+(function () {
+  try {
+    var touch = (navigator.maxTouchPoints || 0) > 0 || ('ontouchstart' in window);
+    var narrow = Math.min(screen.width, screen.height) <= 920 || window.innerWidth <= 920;
+    var uaMobile = /iPhone|iPod|Android.+Mobile/i.test(navigator.userAgent);
+    if ((touch && narrow) || uaMobile) document.documentElement.classList.add('mobile');
+  } catch (e) {}
+})();
+</script>
+</head>
+<body>
+
+  <!-- 脚本自检：正常时由 init() 移除；若一直显示 = 当前环境（如微信文件预览）不运行脚本 -->
+  <div id="jsWarn">⚠️ 当前方式打开无法运行本工具（不执行脚本）。请改用<b>链接</b>打开（手机与电脑连同一 Wi-Fi）：<br>
+    <a href="http://192.168.8.103:8000/?v=11">http://192.168.8.103:8000/?v=11</a> 或
+    <a href="http://192.168.5.70:8000/?v=11">http://192.168.5.70:8000/?v=11</a>
+  </div>
+
+  <!-- 顶栏 -->
+  <header id="topbar">
+    <div class="logo"><span class="logo-dot"></span>Circle Studio</div>
+    <span id="verBadge">v11</span>
+    <div class="toolbar">
+      <button id="btnUndo" title="撤销 (Ctrl+Z)">↩ 撤销</button>
+      <button id="btnRedo" title="重做 (Ctrl+Shift+Z)">↪ 重做</button>
+      <button id="btnClear" class="danger" title="清空画布（可用撤销恢复）">清空画布</button>
+    </div>
+    <div class="count" id="countLabel">画布上有 0 个圆形</div>
+  </header>
+
+  <!-- 主体：左组件栏 + 中画布 -->
+  <div id="main">
+    <!-- 手机端诊断条：只显示信息，不拦截任何操作 -->
+    <div id="diag"></div>
+
+    <aside id="sidebar">
+      <div class="panel-title">基础组件</div>
+
+      <!-- 手机端：底部抽屉标题栏，点击展开 / 收起 -->
+      <div id="trayToggle"><span>基础组件</span><span id="trayVer">v11</span><span id="trayChevron">▾</span></div>
+
+      <div id="trayCards">
+      <div class="comp-card" data-mm="4" title="拖拽到画布，或点击放入画布中心">
+        <span class="preview-slot"><span class="comp-preview" style="width:16px;height:16px;background:#ef4444"></span></span>
+        <div class="comp-info">
+          <div class="comp-name">4mm 圆形</div>
+          <div class="comp-sub">红色标识</div>
+        </div>
+      </div>
+
+      <div class="comp-card" data-mm="6" title="拖拽到画布，或点击放入画布中心">
+        <span class="preview-slot"><span class="comp-preview" style="width:24px;height:24px;background:#2563eb"></span></span>
+        <div class="comp-info">
+          <div class="comp-name">6mm 圆形</div>
+          <div class="comp-sub">蓝色标识</div>
+        </div>
+      </div>
+
+      <div class="comp-card" data-mm="10" title="拖拽到画布，或点击放入画布中心">
+        <span class="preview-slot"><span class="comp-preview" style="width:40px;height:40px;background:#10b981"></span></span>
+        <div class="comp-info">
+          <div class="comp-name">10mm 圆形</div>
+          <div class="comp-sub">绿色标识</div>
+        </div>
+      </div>
+
+      <div class="comp-card" id="compCustom" title="输入尺寸后拖拽到画布，或点击放入画布中心">
+        <span class="preview-slot"><span class="comp-preview" id="customPreview" style="width:32px;height:32px;background:#f59e0b"></span></span>
+        <div class="comp-info">
+          <div class="comp-name">自定义大小</div>
+          <div class="custom-row">
+            <input type="number" id="customMm" min="1" max="60" step="0.5" value="8"><span class="unit">mm</span>
+          </div>
+        </div>
+      </div>
+
+      </div><!-- /trayCards -->
+
+      <div class="sidebar-hint">颜色随尺寸自动分配<br>不同尺寸不同色 · 同尺寸同色<br>拖入后大小固定 · 不可重叠<br>双击画布放入最近尺寸</div>
+    </aside>
+
+    <div id="canvasScroll">
+      <div id="board">
+        <!-- 圆形元素由 JS 动态插入 -->
+        <div id="selectionBox" class="hidden"></div>
+
+        <!-- 自动贴近参考线 -->
+        <div id="guideH" class="guide hidden"></div>
+        <div id="guideV" class="guide hidden"></div>
+      </div>
+    </div>
+
+    <!-- 属性面板（选中圆形时显示） -->
+    <aside id="props" class="hidden">
+      <div class="props-title">圆形属性 <span id="propId" class="muted"></span></div>
+
+      <div class="field">
+        <label>直径</label>
+        <div class="size-display">
+          <span class="dot" id="propDot"></span>
+          <span id="propMm">6mm · 尺寸固定</span>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>位置（mm）</label>
+        <div class="row">
+          <span class="mini">X</span><input type="number" id="propX" min="0" step="0.1">
+          <span class="mini">Y</span><input type="number" id="propY" min="0" step="0.1">
+        </div>
+      </div>
+
+      <div class="btn-row">
+        <button id="btnDup" title="复制选中圆形 (Ctrl+D)">复制</button>
+        <button id="btnDel" class="danger" title="删除选中圆形 (Delete)">删除</button>
+      </div>
+    </aside>
+  </div>
+
+  <!-- 底部状态栏 -->
+  <footer id="statusbar">
+    <span>拖入 / 双击画布添加圆形 · 拖动移动 · 靠近约 1cm 自动贴近 · 尺寸固定 · 圆形不可重叠 · Delete 删除 · Ctrl+Z 撤销</span>
+    <span id="posLabel">x 0mm, y 0mm</span>
+  </footer>
+
+  <!-- 从组件栏拖出时跟随鼠标的幻影 -->
+  <div id="dragGhost" class="hidden"></div>
+
+<script>
+'use strict';
+
+// ========== 工具函数 ==========
+const $ = (sel, root = document) => root.querySelector(sel);
+const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
+const fmtMm = (mm) => Number.isInteger(mm) ? String(mm) : mm.toFixed(1);
+
+// ========== 常量 ==========
+const MM = 8;                                // 比例尺：1mm = 8px（约 2.1 倍物理尺寸，便于观察和拖拽）
+const BOARD_W = 2400, BOARD_H = 1600;        // 画布逻辑尺寸 = 300mm × 200mm
+const SNAP_DIST = 38;                        // 自动贴近阈值：约屏幕上的 1cm（96 DPI）
+const CUSTOM_MIN = 1, CUSTOM_MAX = 60;       // 自定义尺寸范围（mm）
+const PREVIEW_SCALE = 4;                     // 组件面板预览：1mm = 4px
+
+// 尺寸 → 颜色：预设尺寸固定色；新尺寸首次出现时从未使用的颜色中依次分配。
+// 基础色用完后按黄金角生成新色相，保证「不同尺寸不同颜色、相同尺寸颜色一致」永远成立。
+const SIZE_COLORS = { 4: '#ef4444', 6: '#2563eb', 10: '#10b981' };
+const BASE_COLORS = [
+  '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#84cc16', '#64748b',
+  '#0ea5e9', '#d946ef', '#f97316', '#65a30d',
+];
+const sizeColorMap = Object.assign({}, SIZE_COLORS);
+let nextColorIndex = 0;
+
+// HSL 转 HEX（用于扩展色相）
+function hslToHex(h, s, l) {
+  s /= 100; l /= 100;
+  const k = n => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  const hex = x => Math.round(255 * x).toString(16).padStart(2, '0');
+  return '#' + hex(f(0)) + hex(f(8)) + hex(f(4));
+}
+
+function colorForSize(mm) {
+  const key = Math.round(mm * 2) / 2;        // 按 0.5mm 归一，同尺寸必然同色
+  if (sizeColorMap[key] == null) {
+    sizeColorMap[key] = nextColorIndex < BASE_COLORS.length
+      ? BASE_COLORS[nextColorIndex++]
+      : hslToHex((nextColorIndex++ * 137.508) % 360, 62, 55);
+  }
+  return sizeColorMap[key];
+}
+
+// ========== 状态 ==========
+let circles = [];        // 所有圆形：{ id, x, y, d, mm, color }，x/y 为左上角（px），d 为直径（px），mm 为标称尺寸
+let selectedId = null;   // 当前选中的圆形 id
+let nextId = 1;
+let lastMm = 6;          // 最近使用的尺寸（双击画布空白处时使用）
+let nudged = false;      // 方向键微调标记（keyup 时统一提交历史）
+
+const history = [];      // 撤销栈（状态快照）
+let historyIndex = -1;
+
+// ========== DOM 引用 ==========
+const board = $('#board');
+const scroller = $('#canvasScroll');
+const selBox = $('#selectionBox');
+const propsEl = $('#props');
+const ghost = $('#dragGhost');
+const guideH = $('#guideH'), guideV = $('#guideV');
+
+// ========== 历史记录（撤销 / 重做） ==========
+function commit() {
+  history.splice(historyIndex + 1);
+  history.push(JSON.stringify(circles));
+  historyIndex = history.length - 1;
+  updateToolbar();
+}
+function undo() { if (historyIndex > 0) { historyIndex--; loadSnapshot(); } }
+function redo() { if (historyIndex < history.length - 1) { historyIndex++; loadSnapshot(); } }
+function loadSnapshot() {
+  circles = JSON.parse(history[historyIndex]);
+  if (!circles.some(c => c.id === selectedId)) selectedId = null;
+  render();
+  updateToolbar();
+}
+function updateToolbar() {
+  $('#btnUndo').disabled = historyIndex <= 0;
+  $('#btnRedo').disabled = historyIndex >= history.length - 1;
+}
+
+// ========== 渲染（增量同步 DOM） ==========
+function render() {
+  const seen = new Set();
+  for (const c of circles) {
+    seen.add(c.id);
+    let el = board.querySelector(`.shape[data-id="${c.id}"]`);
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'shape';
+      el.dataset.id = c.id;
+      board.appendChild(el);
+    }
+    Object.assign(el.style, {
+      left: c.x + 'px', top: c.y + 'px',
+      width: c.d + 'px', height: c.d + 'px',
+      background: c.color,
+    });
+  }
+  board.querySelectorAll('.shape').forEach(el => {
+    if (!seen.has(Number(el.dataset.id))) el.remove();
+  });
+  updateSelBox();
+  updateProps();
+  $('#countLabel').textContent = `画布上有 ${circles.length} 个圆形`;
+}
+
+function selectedCircle() { return circles.find(c => c.id === selectedId) || null; }
+
+function updateSelBox() {
+  const c = selectedCircle();
+  if (!c) { selBox.classList.add('hidden'); return; }
+  selBox.classList.remove('hidden');
+  selBox.style.left = (c.x - 2) + 'px';
+  selBox.style.top = (c.y - 2) + 'px';
+  selBox.style.width = (c.d + 4) + 'px';
+  selBox.style.height = (c.d + 4) + 'px';
+}
+
+// 正在输入的控件不回写，避免打字时光标跳动
+function setValIfIdle(el, v) {
+  if (document.activeElement === el) return;
+  el.value = v;
+}
+
+function updateProps() {
+  const c = selectedCircle();
+  if (!c) { propsEl.classList.add('hidden'); return; }
+  propsEl.classList.remove('hidden');
+  $('#propId').textContent = '#' + c.id;
+  $('#propMm').textContent = fmtMm(c.mm) + 'mm · 尺寸固定';
+  $('#propDot').style.background = c.color;
+  setValIfIdle($('#propX'), (c.x / MM).toFixed(1));
+  setValIfIdle($('#propY'), (c.y / MM).toFixed(1));
+}
+
+function select(id) { selectedId = id; render(); }
+
+// ========== 增删改 ==========
+function addCircle(cx, cy, mm) {
+  const d = mm * MM;
+  const c = {
+    id: nextId++,
+    mm, d,
+    color: colorForSize(mm),                 // 颜色由尺寸决定
+  };
+  // 防重叠：落点（圆心）若与其他圆形重叠，推到相切位置
+  const pos = resolvePosition(c, cx, cy);
+  c.x = clamp(pos.cx - d / 2, 0, BOARD_W - d);
+  c.y = clamp(pos.cy - d / 2, 0, BOARD_H - d);
+  circles.push(c);
+  selectedId = c.id;
+  lastMm = mm;
+  commit();
+  render();
+  return c;
+}
+
+function deleteCircle(id) {
+  const i = circles.findIndex(c => c.id === id);
+  if (i === -1) return;
+  circles.splice(i, 1);
+  if (selectedId === id) selectedId = null;
+  commit();
+  render();
+}
+
+function duplicateSelected() {
+  const c = selectedCircle();
+  if (!c) return;
+  const n = { ...c, id: nextId++ };
+  // 复制到右下偏移处，若与其他圆形重叠则自动推开
+  const pos = resolvePosition(n, c.x + 30 + c.d / 2, c.y + 30 + c.d / 2);
+  n.x = clamp(pos.cx - c.d / 2, 0, BOARD_W - c.d);
+  n.y = clamp(pos.cy - c.d / 2, 0, BOARD_H - c.d);
+  circles.push(n);
+  selectedId = n.id;
+  commit();
+  render();
+}
+
+// ========== 坐标换算 ==========
+function viewportCenter() {
+  // 手机端底部抽屉会遮挡画布，取「可见区域」的中心
+  const trayH = window.innerWidth <= 768 ? $('#sidebar').offsetHeight : 0;
+  return {
+    x: scroller.scrollLeft + scroller.clientWidth / 2,
+    y: scroller.scrollTop + Math.max(0, (scroller.clientHeight - trayH) / 2),
+  };
+}
+function boardPoint(e) {
+  const r = board.getBoundingClientRect();
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+function pointOnBoard(e) {
+  const r = board.getBoundingClientRect();
+  return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+}
+
+// ========== 通用「轻点」工具 ==========
+// 微信等内置浏览器对 click / pointer 事件派发不稳定，触摸设备优先用 touchend，
+// 鼠标走 click；两者去重。位移超过 12px 视为滑动，不算轻点。
+function onTap(el, handler) {
+  let sx = 0, sy = 0, lastTouch = 0;
+  el.addEventListener('touchstart', (e) => {
+    const t = e.changedTouches[0];
+    sx = t.clientX; sy = t.clientY;
+  }, { passive: true });
+  el.addEventListener('touchend', (e) => {
+    const t = e.changedTouches[0];
+    if (Math.hypot(t.clientX - sx, t.clientY - sy) > 12) return;
+    lastTouch = Date.now();
+    handler(e);
+  }, { passive: true });
+  el.addEventListener('click', (e) => {
+    if (Date.now() - lastTouch < 500) return;   // touch 已处理过，避免重复触发
+    handler(e);
+  });
+}
+
+// ========== 左侧组件栏：拖拽 / 点击添加 ==========
+(function initSidebarDrag() {
+  const customInput = $('#customMm');
+  let suppressClickUntil = 0;   // 拖拽放下后短暂抑制 click，防止重复添加
+
+  // 读取某张组件卡当前的尺寸（mm）
+  function sizeOfCard(card) {
+    if (card.id !== 'compCustom') return Number(card.dataset.mm);
+    return clamp(Number(customInput.value) || 8, CUSTOM_MIN, CUSTOM_MAX);
+  }
+
+  document.querySelectorAll('.comp-card').forEach(card => {
+    card.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      if (e.target.closest('input, button')) return;   // 自定义输入框不触发拖拽
+      // 注意：这里不能 preventDefault —— iOS WebKit 会因此吞掉后续 click/touchend
+
+      const mm = sizeOfCard(card);
+      const d = mm * MM;
+      const color = colorForSize(mm);
+      let startX = e.clientX, startY = e.clientY, dragging = false;
+
+      const onMove = (ev) => {
+        if (!dragging && Math.hypot(ev.clientX - startX, ev.clientY - startY) > 4) {
+          dragging = true;
+          ghost.style.width = ghost.style.height = d + 'px';
+          ghost.style.borderColor = color;
+          ghost.style.background = color + '44';       // 8 位十六进制带透明度
+          ghost.classList.remove('hidden');
+        }
+        if (dragging) {
+          ghost.style.left = ev.clientX + 'px';
+          ghost.style.top = ev.clientY + 'px';
+        }
+      };
+      const detach = () => {
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+        document.removeEventListener('pointercancel', onCancel);
+        ghost.classList.add('hidden');
+      };
+      const onUp = (ev) => {
+        detach();
+        if (dragging) {
+          // 拖拽释放：必须落在画布上、且不在底部抽屉范围内，才算有效放置
+          // （否则手指轻点的几像素抖动会把圆圈丢在抽屉背后，看起来像没反应）
+          const over = document.elementFromPoint(ev.clientX, ev.clientY);
+          if (pointOnBoard(ev) && !(over && over.closest('#sidebar'))) {
+            suppressClickUntil = Date.now() + 400;   // 拖拽成功后抑制随之而来的 click
+            const p = boardPoint(ev);
+            addCircle(p.x, p.y, mm);
+          }
+        }
+        // 轻点不走这里：统一交给下面的 click 事件（微信等内置浏览器更可靠）
+      };
+      const onCancel = () => detach();   // 触摸被浏览器接管（如滑动组件栏）时直接放弃
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
+      document.addEventListener('pointercancel', onCancel);
+    });
+
+    // 轻点组件：放入画布可见区域中心（onTap：touchend 优先，兼容微信）
+    onTap(card, (e) => {
+      if (e.target && e.target.closest && e.target.closest('input, button')) return;   // 点自定义输入框时不添加
+      if (Date.now() < suppressClickUntil) return;
+      const ctr = viewportCenter();
+      const off = ((circles.length % 5) - 2) * 28;
+      addCircle(ctr.x + off, ctr.y + off, sizeOfCard(card));
+    });
+  });
+
+  // 自定义尺寸输入：预览实时变化
+  function syncCustomPreview() {
+    const mm = clamp(Number(customInput.value) || 8, CUSTOM_MIN, CUSTOM_MAX);
+    const pv = $('#customPreview');
+    pv.style.width = pv.style.height = (mm * PREVIEW_SCALE) + 'px';
+    pv.style.background = colorForSize(mm);
+  }
+  customInput.addEventListener('input', syncCustomPreview);
+  customInput.addEventListener('change', () => {
+    customInput.value = clamp(Number(customInput.value) || 8, CUSTOM_MIN, CUSTOM_MAX);
+    syncCustomPreview();
+  });
+  syncCustomPreview();
+})();
+
+// 手机端底部组件抽屉：轻点标题栏展开 / 收起（onTap 兼容微信）
+onTap($('#trayToggle'), () => {
+  document.body.classList.toggle('tray-collapsed');
+});
+
+// ========== 画布：选中 / 移动 / 取消选中 ==========
+board.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return;
+  const shapeEl = e.target.closest('.shape');
+  if (shapeEl) {
+    const id = Number(shapeEl.dataset.id);
+    select(id);
+    startMove(e, id);
+  } else if (e.target === board) {
+    select(null);   // 点击空白处取消选中
+  }
+});
+
+// 轻点圆形：选中（onTap 兜底，个别内核不派发 pointer 事件时仍可选中 / 取消选中）
+onTap(board, (e) => {
+  const shapeEl = e.target && e.target.closest && e.target.closest('.shape');
+  if (shapeEl) select(Number(shapeEl.dataset.id));
+  else if (e.target === board) select(null);
+});
+
+// 双击画布空白处：在落点添加最近使用尺寸的圆形
+board.addEventListener('dblclick', (e) => {
+  if (e.target === board) {
+    const p = boardPoint(e);
+    addCircle(p.x, p.y, lastMm);
+  }
+});
+
+// ========== 自动贴近（磁吸吸附） ==========
+// 拖动圆形与其他圆形靠近到约 1cm 内时自动贴住：
+//   1) 轴向贴近：圆心接近同一水平/垂直线 + 边距进入阈值 → 左右/上下贴住（显示参考线）
+//   2) 径向贴近：任意方向靠近到相切距离 + 阈值内 → 沿圆心连线贴住（相切）
+// 继续用力拖动越过阈值即可脱离吸附。
+function clearSnapFx() {
+  guideH.classList.add('hidden');
+  guideV.classList.add('hidden');
+  board.querySelectorAll('.snap-target').forEach(el => el.classList.remove('snap-target'));
+}
+
+// 根据原始（未吸附）圆心位置，计算最佳吸附结果；无吸附返回 null
+function computeSnap(c, rawCx, rawCy) {
+  let best = null;
+  const consider = (cx, cy, t, axis, weight) => {
+    const disp = Math.hypot(cx - rawCx, cy - rawCy) * weight;   // 位移越小吸附越强
+    if (!best || disp < best.disp) best = { cx, cy, t, axis, disp };
+  };
+
+  for (const t of circles) {
+    if (t.id === c.id) continue;
+    const rc = c.d / 2, rt = t.d / 2;
+    const tcx = t.x + rt, tcy = t.y + rt;
+
+    // 轴向贴近（权重更高，优先保证整齐排列）
+    if (Math.abs(rawCy - tcy) <= SNAP_DIST) {
+      const gapR = (rawCx - rc) - (tcx + rt);   // C 在 T 右侧时的边距
+      const gapL = (tcx - rt) - (rawCx + rc);   // C 在 T 左侧时的边距
+      if (gapR >= 0 && gapR <= SNAP_DIST) consider(tcx + rt + rc, tcy, t, 'h', 0.7);
+      else if (gapL >= 0 && gapL <= SNAP_DIST) consider(tcx - rt - rc, tcy, t, 'h', 0.7);
+    }
+    if (Math.abs(rawCx - tcx) <= SNAP_DIST) {
+      const gapB = (rawCy - rc) - (tcy + rt);   // C 在 T 下方时的边距
+      const gapT = (tcy - rt) - (rawCy + rc);   // C 在 T 上方时的边距
+      if (gapB >= 0 && gapB <= SNAP_DIST) consider(tcx, tcy + rt + rc, t, 'v', 0.7);
+      else if (gapT >= 0 && gapT <= SNAP_DIST) consider(tcx, tcy - rt - rc, t, 'v', 0.7);
+    }
+
+    // 径向贴近：中心距离落在 [相切距离, 相切距离 + 阈值] 时贴到相切位置
+    const dist = Math.hypot(rawCx - tcx, rawCy - tcy);
+    const touchD = rc + rt;
+    if (dist >= touchD && dist <= touchD + SNAP_DIST) {
+      const k = touchD / dist;
+      consider(tcx + (rawCx - tcx) * k, tcy + (rawCy - tcy) * k, t, null, 1);
+    }
+  }
+  return best;
+}
+
+function showSnapFx(snap) {
+  clearSnapFx();
+  const tEl = board.querySelector(`.shape[data-id="${snap.t.id}"]`);
+  if (tEl) tEl.classList.add('snap-target');
+  if (snap.axis === 'h') {
+    guideH.style.top = (snap.t.y + snap.t.d / 2) + 'px';
+    guideH.classList.remove('hidden');
+  } else if (snap.axis === 'v') {
+    guideV.style.left = (snap.t.x + snap.t.d / 2) + 'px';
+    guideV.classList.remove('hidden');
+  }
+}
+
+// ========== 防重叠（硬约束） ==========
+// 圆形之间不允许重叠（允许相切）。将期望圆心迭代推离所有重叠的圆形，
+// 并收缩到画布边界内；效果像推硬币，被挡住时沿表面滑动。
+function resolvePosition(c, cx, cy) {
+  const rc = c.d / 2;
+  for (let outer = 0; outer < 8; outer++) {
+    let pushed = false;
+    for (const t of circles) {
+      if (t.id === c.id) continue;
+      const rt = t.d / 2, minD = rc + rt;
+      const tcx = t.x + rt, tcy = t.y + rt;
+      let dx = cx - tcx, dy = cy - tcy;
+      let dist = Math.hypot(dx, dy);
+      if (dist < minD - 0.01) {
+        if (dist < 0.001) { dx = cx <= tcx ? -1 : 1; dy = 0; dist = 1; }  // 完全重合：往来源一侧推开
+        const k = minD / dist;
+        cx = tcx + dx * k; cy = tcy + dy * k;
+        pushed = true;
+      }
+    }
+    const nx = clamp(cx - rc, 0, BOARD_W - c.d) + rc;
+    const ny = clamp(cy - rc, 0, BOARD_H - c.d) + rc;
+    if (nx !== cx || ny !== cy) pushed = true;
+    cx = nx; cy = ny;
+    if (!pushed) break;
+  }
+  return { cx, cy };
+}
+
+function startMove(e, id) {
+  // 注意：不能 preventDefault —— iOS WebKit 会因此吞掉后续 click 事件
+  const c = circles.find(x => x.id === id);
+  if (!c) return;
+  const p0 = boardPoint(e);
+  const ox = p0.x - c.x, oy = p0.y - c.y;
+  let moved = false;
+
+  const onMove = (ev) => {
+    const p = boardPoint(ev);
+    // 原始（未吸附）的圆心位置
+    const rawCx = p.x - ox + c.d / 2;
+    const rawCy = p.y - oy + c.d / 2;
+    // 自动贴近
+    clearSnapFx();
+    const snap = computeSnap(c, rawCx, rawCy);
+    let cx = snap ? snap.cx : rawCx;
+    let cy = snap ? snap.cy : rawCy;
+    if (snap) showSnapFx(snap);
+    // 防重叠 + 画布边界
+    const pos = resolvePosition(c, cx, cy);
+    const nx = pos.cx - c.d / 2;
+    const ny = pos.cy - c.d / 2;
+    if (nx !== c.x || ny !== c.y) {
+      moved = true;
+      c.x = nx; c.y = ny;
+      render();
+    }
+  };
+  const finish = () => {
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', finish);
+    document.removeEventListener('pointercancel', finish);
+    clearSnapFx();
+    if (moved) commit();
+  };
+  document.addEventListener('pointermove', onMove);
+  document.addEventListener('pointerup', finish);
+  document.addEventListener('pointercancel', finish);
+}
+
+// ========== 键盘快捷键 ==========
+document.addEventListener('keydown', (e) => {
+  const tag = document.activeElement && document.activeElement.tagName;
+  const typing = tag === 'INPUT' || tag === 'TEXTAREA';
+
+  if (e.key === 'Escape') {
+    if (typing) document.activeElement.blur();
+    else select(null);
+    return;
+  }
+  if (typing) return;
+
+  const mod = e.ctrlKey || e.metaKey;
+  if (mod && e.key.toLowerCase() === 'z') {
+    e.preventDefault();
+    e.shiftKey ? redo() : undo();
+  } else if (mod && e.key.toLowerCase() === 'y') {
+    e.preventDefault(); redo();
+  } else if (mod && e.key.toLowerCase() === 'd') {
+    e.preventDefault(); duplicateSelected();
+  } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId != null) {
+    deleteCircle(selectedId);
+  } else if (e.key.startsWith('Arrow') && selectedId != null) {
+    e.preventDefault();
+    const step = (e.shiftKey ? 4 : 1) * MM / 2;   // 0.5mm，Shift 加速为 2mm
+    const c = selectedCircle();
+    if (!c) return;
+    let dx = 0, dy = 0;
+    if (e.key === 'ArrowLeft')  dx = -step;
+    if (e.key === 'ArrowRight') dx = step;
+    if (e.key === 'ArrowUp')    dy = -step;
+    if (e.key === 'ArrowDown')  dy = step;
+    // 防重叠：被其他圆形挡住时停在其表面
+    const pos = resolvePosition(c, c.x + c.d / 2 + dx, c.y + c.d / 2 + dy);
+    c.x = pos.cx - c.d / 2;
+    c.y = pos.cy - c.d / 2;
+    render();
+    nudged = true;   // keyup 时统一提交一次历史
+  }
+});
+document.addEventListener('keyup', (e) => {
+  if (e.key.startsWith('Arrow') && nudged) { nudged = false; commit(); }
+});
+
+// ========== 属性面板绑定 ==========
+$('#propX').addEventListener('input', (e) => {
+  const c = selectedCircle(); if (!c) return;
+  const mm = Number(e.target.value) || 0;
+  const pos = resolvePosition(c, mm * MM + c.d / 2, c.y + c.d / 2);
+  c.x = pos.cx - c.d / 2; c.y = pos.cy - c.d / 2;
+  render();
+});
+$('#propY').addEventListener('input', (e) => {
+  const c = selectedCircle(); if (!c) return;
+  const mm = Number(e.target.value) || 0;
+  const pos = resolvePosition(c, c.x + c.d / 2, mm * MM + c.d / 2);
+  c.x = pos.cx - c.d / 2; c.y = pos.cy - c.d / 2;
+  render();
+});
+['#propX', '#propY'].forEach(s => $(s).addEventListener('change', commit));
+
+$('#btnDup').addEventListener('click', duplicateSelected);
+$('#btnDel').addEventListener('click', () => { if (selectedId != null) deleteCircle(selectedId); });
+
+// ========== 顶栏按钮 ==========
+$('#btnUndo').addEventListener('click', undo);
+$('#btnRedo').addEventListener('click', redo);
+$('#btnClear').addEventListener('click', () => {
+  if (!circles.length) return;
+  circles = [];
+  selectedId = null;
+  commit();
+  render();
+});
+
+// ========== 状态栏：鼠标坐标（mm） ==========
+scroller.addEventListener('pointermove', (e) => {
+  const p = boardPoint(e);
+  $('#posLabel').textContent = `x ${(p.x / MM).toFixed(1)}mm, y ${(p.y / MM).toFixed(1)}mm`;
+});
+
+// ========== 诊断条（手机端）：显示版本 / 视口 / 媒体查询 / 事件计数 / JS 错误 ==========
+(function initDiag() {
+  const el = $('#diag');
+  if (!el) return;
+  let pd = 0, te = 0, ck = 0, err = '';
+  const mq = window.matchMedia('(max-width: 768px)');
+  const update = () => {
+    el.textContent = `v11 · ${window.innerWidth}×${window.innerHeight} · MQ:${mq.matches ? 'Y' : 'N'} · CL:${document.documentElement.classList.contains('mobile') ? 'Y' : 'N'} · pd:${pd} te:${te} ck:${ck}` + (err ? ` · ERR:${err}` : '');
+  };
+  document.addEventListener('pointerdown', () => { pd++; update(); }, true);
+  document.addEventListener('touchend', () => { te++; update(); }, true);
+  document.addEventListener('click', () => { ck++; update(); }, true);
+  window.addEventListener('error', (e) => { err = String(e.message).slice(0, 40); update(); });
+  window.addEventListener('resize', update);
+  update();
+})();
+
+// ========== 初始化：预置三种尺寸的示例圆形 ==========
+function addSeed(x, y, mm) {
+  circles.push({ id: nextId++, mm, d: mm * MM, x, y, color: colorForSize(mm) });
+}
+(function init() {
+  const ctr = viewportCenter();
+  addSeed(ctr.x - 140, ctr.y - 30, 4);
+  addSeed(ctr.x - 40,  ctr.y - 70, 6);
+  addSeed(ctr.x + 90,  ctr.y + 10, 10);
+  history.length = 0;
+  historyIndex = -1;
+  commit();      // 初始状态作为历史的基线
+  render();
+  // 脚本自检通过：移除警告横幅（若横幅仍在 = 脚本未运行 / 打开的是旧文件）
+  const jw = document.getElementById('jsWarn');
+  if (jw) jw.parentNode.removeChild(jw);
+})();
+</script>
+</body>
+</html>

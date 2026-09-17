@@ -115,6 +115,16 @@
     transform: translate(-50%, -50%); pointer-events: none; z-index: 999;
   }
 
+  /* ========== 画布缩放控件 ========== */
+  #zoomCtl {
+    position: absolute; right: 14px; bottom: 14px; z-index: 15;
+    display: flex; align-items: center; gap: 4px;
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+    padding: 4px; box-shadow: 0 4px 12px rgba(15, 23, 42, .08);
+  }
+  #zoomCtl button { padding: 3px 10px; font-size: 13px; }
+  #zoomPct { font-size: 11px; color: #6b7280; min-width: 40px; text-align: center; }
+
   /* ========== 右侧浮动属性面板 ========== */
   #props {
     position: absolute; right: 16px; top: 14px; width: 228px; background: #fff;
@@ -219,6 +229,14 @@
     .mini { font-size: 10px; }
     .btn-row { gap: 6px; }
     .btn-row button { flex: none; padding: 3px 10px; font-size: 11px; }
+
+    /* 缩放控件：手机固定在画布右侧中部（避开顶部属性栏和底部抽屉） */
+    #zoomCtl {
+      position: fixed; right: 8px; top: 45%; transform: translateY(-50%);
+      flex-direction: column; gap: 3px; padding: 3px; border-radius: 12px;
+    }
+    #zoomCtl button { padding: 5px 11px; font-size: 14px; touch-action: manipulation; }
+    #zoomPct { min-width: 34px; font-size: 10px; }
   }
 </style>
 <script>
@@ -238,14 +256,14 @@
 
   <!-- 脚本自检：正常时由 init() 移除；若一直显示 = 当前环境（如微信文件预览）不运行脚本 -->
   <div id="jsWarn">⚠️ 当前方式打开无法运行本工具（不执行脚本）。请改用<b>链接</b>打开（手机与电脑连同一 Wi-Fi）：<br>
-    <a href="http://192.168.8.103:8000/?v=11">http://192.168.8.103:8000/?v=11</a> 或
-    <a href="http://192.168.5.70:8000/?v=11">http://192.168.5.70:8000/?v=11</a>
+    <a href="http://192.168.8.103:8000/?v=12">http://192.168.8.103:8000/?v=12</a> 或
+    <a href="http://192.168.5.70:8000/?v=12">http://192.168.5.70:8000/?v=12</a>
   </div>
 
   <!-- 顶栏 -->
   <header id="topbar">
     <div class="logo"><span class="logo-dot"></span>Circle Studio</div>
-    <span id="verBadge">v11</span>
+    <span id="verBadge">v12</span>
     <div class="toolbar">
       <button id="btnUndo" title="撤销 (Ctrl+Z)">↩ 撤销</button>
       <button id="btnRedo" title="重做 (Ctrl+Shift+Z)">↪ 重做</button>
@@ -263,7 +281,7 @@
       <div class="panel-title">基础组件</div>
 
       <!-- 手机端：底部抽屉标题栏，点击展开 / 收起 -->
-      <div id="trayToggle"><span>基础组件</span><span id="trayVer">v11</span><span id="trayChevron">▾</span></div>
+      <div id="trayToggle"><span>基础组件</span><span id="trayVer">v12</span><span id="trayChevron">▾</span></div>
 
       <div id="trayCards">
       <div class="comp-card" data-mm="4" title="拖拽到画布，或点击放入画布中心">
@@ -302,7 +320,7 @@
 
       </div><!-- /trayCards -->
 
-      <div class="sidebar-hint">颜色随尺寸自动分配<br>不同尺寸不同色 · 同尺寸同色<br>拖入后大小固定 · 不可重叠<br>双击画布放入最近尺寸</div>
+      <div class="sidebar-hint">颜色随尺寸自动分配<br>不同尺寸不同色 · 同尺寸同色<br>拖入后大小固定 · 不可重叠<br>双击画布放入最近尺寸<br>双指捏合缩放画布</div>
     </aside>
 
     <div id="canvasScroll">
@@ -341,11 +359,19 @@
         <button id="btnDel" class="danger" title="删除选中圆形 (Delete)">删除</button>
       </div>
     </aside>
+
+    <!-- 画布缩放控件 -->
+    <div id="zoomCtl">
+      <button id="zoomOut" title="缩小画布">−</button>
+      <span id="zoomPct">100%</span>
+      <button id="zoomIn" title="放大画布">+</button>
+      <button id="zoomReset" title="重置为 100%">1:1</button>
+    </div>
   </div>
 
   <!-- 底部状态栏 -->
   <footer id="statusbar">
-    <span>拖入 / 双击画布添加圆形 · 拖动移动 · 靠近约 1cm 自动贴近 · 尺寸固定 · 圆形不可重叠 · Delete 删除 · Ctrl+Z 撤销</span>
+    <span>拖入 / 双击画布添加圆形 · 拖动移动 · 靠近约 1cm 自动贴近 · 双指缩放（电脑 Ctrl+滚轮） · 尺寸固定 · 不可重叠 · Delete 删除 · Ctrl+Z 撤销</span>
     <span id="posLabel">x 0mm, y 0mm</span>
   </footer>
 
@@ -537,16 +563,17 @@ function duplicateSelected() {
 
 // ========== 坐标换算 ==========
 function viewportCenter() {
-  // 手机端底部抽屉会遮挡画布，取「可见区域」的中心
+  // 手机端底部抽屉会遮挡画布，取「可见区域」的中心；除以 Z 从屏幕像素换回画布坐标
   const trayH = window.innerWidth <= 768 ? $('#sidebar').offsetHeight : 0;
   return {
-    x: scroller.scrollLeft + scroller.clientWidth / 2,
-    y: scroller.scrollTop + Math.max(0, (scroller.clientHeight - trayH) / 2),
+    x: (scroller.scrollLeft + scroller.clientWidth / 2) / Z,
+    y: (scroller.scrollTop + Math.max(0, (scroller.clientHeight - trayH) / 2)) / Z,
   };
 }
 function boardPoint(e) {
+  // 画布带缩放（transform: scale）：除以 Z 把屏幕坐标换算回画布逻辑坐标
   const r = board.getBoundingClientRect();
-  return { x: e.clientX - r.left, y: e.clientY - r.top };
+  return { x: (e.clientX - r.left) / Z, y: (e.clientY - r.top) / Z };
 }
 function pointOnBoard(e) {
   const r = board.getBoundingClientRect();
@@ -573,6 +600,86 @@ function onTap(el, handler) {
     handler(e);
   });
 }
+
+// ========== 画布缩放（双指捏合 / Ctrl+滚轮 / 控件按钮） ==========
+// 原理：board 用 transform: scale(Z) 放大内容，同时布局宽高同步乘以 Z，
+// 滚动范围自动匹配；所有坐标换算统一在 boardPoint / viewportCenter 里除以 Z。
+let Z = 1;
+const Z_MIN = 0.25, Z_MAX = 4;
+let pinch = null;         // 双指手势状态
+let pinchActive = false;  // 双指期间挂起单指拖拽
+
+function applyZoom() {
+  board.style.width = BOARD_W * Z + 'px';
+  board.style.height = BOARD_H * Z + 'px';
+  board.style.transform = 'scale(' + Z + ')';
+  board.style.transformOrigin = '0 0';
+  $('#zoomPct').textContent = Math.round(Z * 100) + '%';
+}
+
+// 以屏幕坐标 (clientX, clientY) 为锚点缩放到 newZ：锚点下的内容缩放后仍留在原处
+function zoomAt(clientX, clientY, newZ) {
+  const r = scroller.getBoundingClientRect();
+  const vx = clientX - r.left, vy = clientY - r.top;
+  const bx = (scroller.scrollLeft + vx) / Z;   // 锚点的画布坐标
+  const by = (scroller.scrollTop + vy) / Z;
+  Z = clamp(newZ, Z_MIN, Z_MAX);
+  applyZoom();
+  scroller.scrollLeft = bx * Z - vx;
+  scroller.scrollTop = by * Z - vy;
+}
+
+function zoomCenter(newZ) {
+  const r = scroller.getBoundingClientRect();
+  zoomAt(r.left + r.width / 2, r.top + r.height / 2, newZ);
+}
+
+// 双指捏合：缩放比例 = 当前指距 / 起始指距；两指中点移动可同时平移画布
+scroller.addEventListener('touchstart', (e) => {
+  if (e.touches.length !== 2) return;
+  const [a, b] = e.touches;
+  const r = scroller.getBoundingClientRect();
+  pinchActive = true;
+  pinch = {
+    d0: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1,
+    z0: Z,
+    ax: (scroller.scrollLeft + (a.clientX + b.clientX) / 2 - r.left) / Z,
+    ay: (scroller.scrollTop + (a.clientY + b.clientY) / 2 - r.top) / Z,
+  };
+  e.preventDefault();   // 接管双指手势，阻止浏览器滚动/页面缩放
+}, { passive: false });
+
+scroller.addEventListener('touchmove', (e) => {
+  if (!pinch || e.touches.length !== 2) return;
+  const [a, b] = e.touches;
+  const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1;
+  Z = clamp(pinch.z0 * d / pinch.d0, Z_MIN, Z_MAX);
+  applyZoom();
+  const r = scroller.getBoundingClientRect();
+  scroller.scrollLeft = pinch.ax * Z - ((a.clientX + b.clientX) / 2 - r.left);
+  scroller.scrollTop = pinch.ay * Z - ((a.clientY + b.clientY) / 2 - r.top);
+  e.preventDefault();
+}, { passive: false });
+
+function pinchEnd(e) {
+  if (e.touches.length < 2) pinch = null;
+  if (e.touches.length === 0) pinchActive = false;   // 所有手指抬起后才恢复拖拽
+}
+scroller.addEventListener('touchend', pinchEnd, { passive: true });
+scroller.addEventListener('touchcancel', pinchEnd, { passive: true });
+
+// 电脑：Ctrl/⌘ + 滚轮缩放（以光标为锚点）
+scroller.addEventListener('wheel', (e) => {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  e.preventDefault();
+  const k = e.deltaMode === 1 ? 0.066 : 0.002;
+  zoomAt(e.clientX, e.clientY, Z * Math.exp(-e.deltaY * k));
+}, { passive: false });
+
+// 缩放控件（onTap 兼容微信内置浏览器）
+onTap($('#zoomIn'), () => zoomCenter(Z * 1.25));
+onTap($('#zoomOut'), () => zoomCenter(Z / 1.25));
+onTap($('#zoomReset'), () => zoomCenter(1));
 
 // ========== 左侧组件栏：拖拽 / 点击添加 ==========
 (function initSidebarDrag() {
@@ -793,6 +900,7 @@ function startMove(e, id) {
   let moved = false;
 
   const onMove = (ev) => {
+    if (pinchActive) return;   // 双指手势进行中：挂起圆形拖拽
     const p = boardPoint(ev);
     // 原始（未吸附）的圆心位置
     const rawCx = p.x - ox + c.d / 2;
@@ -913,7 +1021,7 @@ scroller.addEventListener('pointermove', (e) => {
   let pd = 0, te = 0, ck = 0, err = '';
   const mq = window.matchMedia('(max-width: 768px)');
   const update = () => {
-    el.textContent = `v11 · ${window.innerWidth}×${window.innerHeight} · MQ:${mq.matches ? 'Y' : 'N'} · CL:${document.documentElement.classList.contains('mobile') ? 'Y' : 'N'} · pd:${pd} te:${te} ck:${ck}` + (err ? ` · ERR:${err}` : '');
+    el.textContent = `v12 · ${window.innerWidth}×${window.innerHeight} · MQ:${mq.matches ? 'Y' : 'N'} · CL:${document.documentElement.classList.contains('mobile') ? 'Y' : 'N'} · pd:${pd} te:${te} ck:${ck}` + (err ? ` · ERR:${err}` : '');
   };
   document.addEventListener('pointerdown', () => { pd++; update(); }, true);
   document.addEventListener('touchend', () => { te++; update(); }, true);
@@ -928,6 +1036,7 @@ function addSeed(x, y, mm) {
   circles.push({ id: nextId++, mm, d: mm * MM, x, y, color: colorForSize(mm) });
 }
 (function init() {
+  applyZoom();
   const ctr = viewportCenter();
   addSeed(ctr.x - 140, ctr.y - 30, 4);
   addSeed(ctr.x - 40,  ctr.y - 70, 6);

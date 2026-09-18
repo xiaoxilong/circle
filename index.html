@@ -266,7 +266,7 @@
   <!-- 顶栏 -->
   <header id="topbar">
     <div class="logo"><span class="logo-dot"></span>Circle Studio</div>
-    <span id="verBadge">v13</span>
+    <span id="verBadge">v14</span>
     <div class="toolbar">
       <button id="btnUndo" title="撤销 (Ctrl+Z)">↩ 撤销</button>
       <button id="btnRedo" title="重做 (Ctrl+Shift+Z)">↪ 重做</button>
@@ -284,7 +284,7 @@
       <div class="panel-title">基础组件</div>
 
       <!-- 手机端：底部抽屉标题栏，点击展开 / 收起 -->
-      <div id="trayToggle"><span>基础组件</span><span id="trayVer">v13</span><span id="trayChevron">▾</span></div>
+      <div id="trayToggle"><span>基础组件</span><span id="trayVer">v14</span><span id="trayChevron">▾</span></div>
 
       <div id="trayCards">
       <div class="comp-card" data-mm="4" title="拖拽到画布，或点击放入画布中心">
@@ -323,7 +323,7 @@
 
       </div><!-- /trayCards -->
 
-      <div class="sidebar-hint">颜色随尺寸自动分配<br>不同尺寸不同色 · 同尺寸同色<br>拖入后大小固定 · 不可重叠<br>双击画布放入最近尺寸<br>画布无限大：双指缩放 / 拖空白平移</div>
+      <div class="sidebar-hint">颜色随尺寸自动分配<br>不同尺寸不同色 · 同尺寸同色<br>拖入后大小固定 · 不可重叠<br>双击画布放入最近尺寸<br>画布无限大：双指缩放 / 拖空白平移<br>自动保存 · 重开网页继续上次的记录</div>
     </aside>
 
     <div id="canvasScroll">
@@ -449,6 +449,7 @@ function commit() {
   history.push(JSON.stringify(circles));
   historyIndex = history.length - 1;
   updateToolbar();
+  saveState();   // 每次状态变化自动保存到本地
 }
 function undo() { if (historyIndex > 0) { historyIndex--; loadSnapshot(); } }
 function redo() { if (historyIndex < history.length - 1) { historyIndex++; loadSnapshot(); } }
@@ -614,6 +615,7 @@ function applyView() {
   scroller.style.backgroundSize = `${s}px ${s}px`;
   scroller.style.backgroundPosition = `${panX % s}px ${panY % s}px`;
   $('#zoomPct').textContent = Math.round(Z * 100) + '%';
+  scheduleViewSave();   // 视图变化防抖保存（平移/缩放每帧都触发，不能直接写）
 }
 
 // 以屏幕坐标 (clientX, clientY) 为锚点缩放到 newZ：锚点下的内容缩放后仍留在原处
@@ -1051,7 +1053,7 @@ scroller.addEventListener('pointermove', (e) => {
   let pd = 0, te = 0, ck = 0, err = '';
   const mq = window.matchMedia('(max-width: 768px)');
   const update = () => {
-    el.textContent = `v13 · ${window.innerWidth}×${window.innerHeight} · MQ:${mq.matches ? 'Y' : 'N'} · CL:${document.documentElement.classList.contains('mobile') ? 'Y' : 'N'} · pd:${pd} te:${te} ck:${ck}` + (err ? ` · ERR:${err}` : '');
+    el.textContent = `v14 · ${window.innerWidth}×${window.innerHeight} · MQ:${mq.matches ? 'Y' : 'N'} · CL:${document.documentElement.classList.contains('mobile') ? 'Y' : 'N'} · pd:${pd} te:${te} ck:${ck}` + (err ? ` · ERR:${err}` : '');
   };
   document.addEventListener('pointerdown', () => { pd++; update(); }, true);
   document.addEventListener('touchend', () => { te++; update(); }, true);
@@ -1061,19 +1063,81 @@ scroller.addEventListener('pointermove', (e) => {
   update();
 })();
 
-// ========== 初始化：预置三种尺寸的示例圆形 ==========
+// ========== 本地持久化（localStorage） ==========
+// 每次状态变化（commit）保存圆形数据；视图（缩放/平移）防抖保存。
+// 重新打开网页时恢复上次的记录。隐私模式/存储不可用时静默跳过，不影响使用。
+const STORE_KEY = 'circleStudio.v1';
+
+function saveState() {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify({
+      circles,                                       // 全部圆形（含颜色、位置、尺寸）
+      view: { z: Z, px: Math.round(panX), py: Math.round(panY) },
+      lastMm,
+      savedAt: Date.now(),
+    }));
+  } catch (e) { /* 存储不可用（隐私模式/已满）：跳过 */ }
+}
+
+let viewSaveTimer = 0;
+function scheduleViewSave() {
+  clearTimeout(viewSaveTimer);
+  viewSaveTimer = setTimeout(saveState, 400);
+}
+
+// 读取并校验本地记录；无记录或数据损坏返回 null
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (!data || !Array.isArray(data.circles)) return null;
+    const ok = data.circles.every(c => c && Number.isFinite(c.x) && Number.isFinite(c.y) &&
+      Number.isFinite(c.d) && c.d > 0 && Number.isFinite(c.mm) && c.mm > 0 &&
+      typeof c.color === 'string');
+    return ok ? data : null;
+  } catch (e) { return null; }
+}
+
+// 按已恢复的圆形重建 尺寸→颜色 映射：保证「同尺寸同色」跨会话依然成立，
+// 且之后新增同尺寸圆形时分配到与上次相同的颜色
+function restoreColorMap(restored) {
+  for (const c of restored) {
+    const key = Math.round(c.mm * 2) / 2;
+    if (sizeColorMap[key] == null) sizeColorMap[key] = c.color;
+  }
+  const used = Object.values(sizeColorMap);
+  nextColorIndex = BASE_COLORS.filter(h => used.includes(h)).length;
+}
+
+// ========== 初始化：有本地记录则恢复，否则预置示例圆形 ==========
 function addSeed(x, y, mm) {
   circles.push({ id: nextId++, mm, d: mm * MM, x, y, color: colorForSize(mm) });
 }
 (function init() {
-  resetView();   // 初始视图：100%，原点 (0,0) 居中
-  const ctr = viewportCenter();
-  addSeed(ctr.x - 140, ctr.y - 30, 4);
-  addSeed(ctr.x - 40,  ctr.y - 70, 6);
-  addSeed(ctr.x + 90,  ctr.y + 10, 10);
+  const saved = loadState();
+  if (saved) {
+    // 恢复上次记录：圆形、颜色映射、视图、最近尺寸
+    restoreColorMap(saved.circles);
+    circles = saved.circles;
+    nextId = circles.length ? Math.max(...circles.map(c => c.id)) + 1 : 1;
+    const last = circles[circles.length - 1];
+    lastMm = Number.isFinite(saved.lastMm) ? saved.lastMm : (last ? last.mm : 6);
+    const v = saved.view || {};
+    Z = clamp(Number(v.z) || 1, Z_MIN, Z_MAX);
+    panX = Number.isFinite(v.px) ? v.px : scroller.clientWidth / 2;
+    panY = Number.isFinite(v.py) ? v.py : scroller.clientHeight / 2;
+    applyView();
+  } else {
+    resetView();   // 首次使用：100%，原点 (0,0) 居中，预置示例
+    const ctr = viewportCenter();
+    addSeed(ctr.x - 140, ctr.y - 30, 4);
+    addSeed(ctr.x - 40,  ctr.y - 70, 6);
+    addSeed(ctr.x + 90,  ctr.y + 10, 10);
+  }
   history.length = 0;
   historyIndex = -1;
-  commit();      // 初始状态作为历史的基线
+  commit();      // 初始状态作为历史的基线（同时保存到本地）
   render();
   // 脚本自检通过：移除警告横幅（若横幅仍在 = 脚本未运行 / 打开的是旧文件）
   const jw = document.getElementById('jsWarn');

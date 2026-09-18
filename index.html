@@ -86,14 +86,18 @@
   .unit { color: #9ca3af; font-size: 11px; }
   .sidebar-hint { margin-top: 10px; font-size: 11px; line-height: 1.9; color: #9ca3af; text-align: center; }
 
-  /* ========== 中间画布 ========== */
-  #canvasScroll { flex: 1; overflow: auto; background: #e8eaef; position: relative; }
-  #board {
-    width: 2400px; height: 1600px; background-color: #fff; position: relative;
-    touch-action: manipulation;   /* 触摸：允许拖动平移画布，禁用双击放大页面 */
+  /* ========== 中间画布（无限画布） ==========
+     白色 + 网格点背景铺在 #canvasScroll 上（尺寸/位置由 JS 随缩放平移更新），
+     永远铺满可视区、不露底色；#board 缩成 0×0 坐标锚点，圆形作为其子元素整体跟变换走 */
+  #canvasScroll {
+    flex: 1; overflow: hidden; position: relative; cursor: grab;
+    background-color: #fff;
     background-image: radial-gradient(circle, #d4d9e0 1.2px, transparent 1.3px);
     background-size: 24px 24px;
+    touch-action: none;   /* 触摸手势由 JS 接管：单指拖动平移、双指缩放 */
   }
+  #canvasScroll:active { cursor: grabbing; }
+  #board { position: absolute; left: 0; top: 0; width: 0; height: 0; transform-origin: 0 0; }
   .shape { position: absolute; border-radius: 50%; cursor: move; z-index: 1; touch-action: none; }
 
   /* ========== 选中框（仅高亮，尺寸不可修改） ========== */
@@ -255,15 +259,14 @@
 <body>
 
   <!-- 脚本自检：正常时由 init() 移除；若一直显示 = 当前环境（如微信文件预览）不运行脚本 -->
-  <div id="jsWarn">⚠️ 当前方式打开无法运行本工具（不执行脚本）。请改用<b>链接</b>打开（手机与电脑连同一 Wi-Fi）：<br>
-    <a href="http://192.168.8.103:8000/?v=12">http://192.168.8.103:8000/?v=12</a> 或
-    <a href="http://192.168.5.70:8000/?v=12">http://192.168.5.70:8000/?v=12</a>
+  <div id="jsWarn">⚠️ 当前方式打开无法运行本工具（不执行脚本）。请改用<b>链接</b>打开：<br>
+    <a href="https://xiaoxilong.github.io/circle/">https://xiaoxilong.github.io/circle/</a>
   </div>
 
   <!-- 顶栏 -->
   <header id="topbar">
     <div class="logo"><span class="logo-dot"></span>Circle Studio</div>
-    <span id="verBadge">v12</span>
+    <span id="verBadge">v13</span>
     <div class="toolbar">
       <button id="btnUndo" title="撤销 (Ctrl+Z)">↩ 撤销</button>
       <button id="btnRedo" title="重做 (Ctrl+Shift+Z)">↪ 重做</button>
@@ -281,7 +284,7 @@
       <div class="panel-title">基础组件</div>
 
       <!-- 手机端：底部抽屉标题栏，点击展开 / 收起 -->
-      <div id="trayToggle"><span>基础组件</span><span id="trayVer">v12</span><span id="trayChevron">▾</span></div>
+      <div id="trayToggle"><span>基础组件</span><span id="trayVer">v13</span><span id="trayChevron">▾</span></div>
 
       <div id="trayCards">
       <div class="comp-card" data-mm="4" title="拖拽到画布，或点击放入画布中心">
@@ -320,18 +323,18 @@
 
       </div><!-- /trayCards -->
 
-      <div class="sidebar-hint">颜色随尺寸自动分配<br>不同尺寸不同色 · 同尺寸同色<br>拖入后大小固定 · 不可重叠<br>双击画布放入最近尺寸<br>双指捏合缩放画布</div>
+      <div class="sidebar-hint">颜色随尺寸自动分配<br>不同尺寸不同色 · 同尺寸同色<br>拖入后大小固定 · 不可重叠<br>双击画布放入最近尺寸<br>画布无限大：双指缩放 / 拖空白平移</div>
     </aside>
 
     <div id="canvasScroll">
+      <!-- 无限画布：#board 是 0×0 坐标锚点，圆形元素由 JS 动态插入 -->
       <div id="board">
-        <!-- 圆形元素由 JS 动态插入 -->
         <div id="selectionBox" class="hidden"></div>
-
-        <!-- 自动贴近参考线 -->
-        <div id="guideH" class="guide hidden"></div>
-        <div id="guideV" class="guide hidden"></div>
       </div>
+
+      <!-- 自动贴近参考线（铺满可视区，坐标由 JS 换算） -->
+      <div id="guideH" class="guide hidden"></div>
+      <div id="guideV" class="guide hidden"></div>
     </div>
 
     <!-- 属性面板（选中圆形时显示） -->
@@ -349,8 +352,8 @@
       <div class="field">
         <label>位置（mm）</label>
         <div class="row">
-          <span class="mini">X</span><input type="number" id="propX" min="0" step="0.1">
-          <span class="mini">Y</span><input type="number" id="propY" min="0" step="0.1">
+          <span class="mini">X</span><input type="number" id="propX" step="0.1">
+          <span class="mini">Y</span><input type="number" id="propY" step="0.1">
         </div>
       </div>
 
@@ -371,7 +374,7 @@
 
   <!-- 底部状态栏 -->
   <footer id="statusbar">
-    <span>拖入 / 双击画布添加圆形 · 拖动移动 · 靠近约 1cm 自动贴近 · 双指缩放（电脑 Ctrl+滚轮） · 尺寸固定 · 不可重叠 · Delete 删除 · Ctrl+Z 撤销</span>
+    <span>拖入 / 双击画布添加圆形 · 拖动移动 · 靠近约 1cm 自动贴近 · 画布无限大：拖空白平移 / 滚轮平移 / 双指缩放（电脑 Ctrl+滚轮缩放） · 不可重叠 · Delete 删除 · Ctrl+Z 撤销</span>
     <span id="posLabel">x 0mm, y 0mm</span>
   </footer>
 
@@ -388,7 +391,6 @@ const fmtMm = (mm) => Number.isInteger(mm) ? String(mm) : mm.toFixed(1);
 
 // ========== 常量 ==========
 const MM = 8;                                // 比例尺：1mm = 8px（约 2.1 倍物理尺寸，便于观察和拖拽）
-const BOARD_W = 2400, BOARD_H = 1600;        // 画布逻辑尺寸 = 300mm × 200mm
 const SNAP_DIST = 38;                        // 自动贴近阈值：约屏幕上的 1cm（96 DPI）
 const CUSTOM_MIN = 1, CUSTOM_MAX = 60;       // 自定义尺寸范围（mm）
 const PREVIEW_SCALE = 4;                     // 组件面板预览：1mm = 4px
@@ -528,8 +530,8 @@ function addCircle(cx, cy, mm) {
   };
   // 防重叠：落点（圆心）若与其他圆形重叠，推到相切位置
   const pos = resolvePosition(c, cx, cy);
-  c.x = clamp(pos.cx - d / 2, 0, BOARD_W - d);
-  c.y = clamp(pos.cy - d / 2, 0, BOARD_H - d);
+  c.x = pos.cx - d / 2;
+  c.y = pos.cy - d / 2;
   circles.push(c);
   selectedId = c.id;
   lastMm = mm;
@@ -553,8 +555,8 @@ function duplicateSelected() {
   const n = { ...c, id: nextId++ };
   // 复制到右下偏移处，若与其他圆形重叠则自动推开
   const pos = resolvePosition(n, c.x + 30 + c.d / 2, c.y + 30 + c.d / 2);
-  n.x = clamp(pos.cx - c.d / 2, 0, BOARD_W - c.d);
-  n.y = clamp(pos.cy - c.d / 2, 0, BOARD_H - c.d);
+  n.x = pos.cx - c.d / 2;
+  n.y = pos.cy - c.d / 2;
   circles.push(n);
   selectedId = n.id;
   commit();
@@ -563,21 +565,17 @@ function duplicateSelected() {
 
 // ========== 坐标换算 ==========
 function viewportCenter() {
-  // 手机端底部抽屉会遮挡画布，取「可见区域」的中心；除以 Z 从屏幕像素换回画布坐标
+  // 可视区域中心（手机端扣除底部抽屉高度），从屏幕坐标换回画布坐标
   const trayH = window.innerWidth <= 768 ? $('#sidebar').offsetHeight : 0;
   return {
-    x: (scroller.scrollLeft + scroller.clientWidth / 2) / Z,
-    y: (scroller.scrollTop + Math.max(0, (scroller.clientHeight - trayH) / 2)) / Z,
+    x: (scroller.clientWidth / 2 - panX) / Z,
+    y: (Math.max(0, scroller.clientHeight - trayH) / 2 - panY) / Z,
   };
 }
 function boardPoint(e) {
-  // 画布带缩放（transform: scale）：除以 Z 把屏幕坐标换算回画布逻辑坐标
+  // 画布带平移/缩放变换：先减去原点偏移再除以 Z，换回画布逻辑坐标
   const r = board.getBoundingClientRect();
   return { x: (e.clientX - r.left) / Z, y: (e.clientY - r.top) / Z };
-}
-function pointOnBoard(e) {
-  const r = board.getBoundingClientRect();
-  return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
 }
 
 // ========== 通用「轻点」工具 ==========
@@ -601,19 +599,20 @@ function onTap(el, handler) {
   });
 }
 
-// ========== 画布缩放（双指捏合 / Ctrl+滚轮 / 控件按钮） ==========
-// 原理：board 用 transform: scale(Z) 放大内容，同时布局宽高同步乘以 Z，
-// 滚动范围自动匹配；所有坐标换算统一在 boardPoint / viewportCenter 里除以 Z。
-let Z = 1;
+// ========== 无限画布：缩放 + 平移（双指 / Ctrl+滚轮 / 拖拽空白 / 滚轮） ==========
+// 视图 = 平移(panX,panY) + 缩放(Z)：屏幕坐标 = 画布坐标 * Z + pan。
+// #board 是 0×0 坐标锚点，用 transform 整体移动/缩放；白色网格背景铺在
+// #canvasScroll 上、随视图同步滚动 —— 画布无限大，任何缩放比例都不会露出底色。
+let Z = 1, panX = 0, panY = 0;
 const Z_MIN = 0.25, Z_MAX = 4;
 let pinch = null;         // 双指手势状态
-let pinchActive = false;  // 双指期间挂起单指拖拽
+let pinchActive = false;  // 双指期间挂起单指拖拽/平移
 
-function applyZoom() {
-  board.style.width = BOARD_W * Z + 'px';
-  board.style.height = BOARD_H * Z + 'px';
-  board.style.transform = 'scale(' + Z + ')';
-  board.style.transformOrigin = '0 0';
+function applyView() {
+  board.style.transform = `translate(${panX}px, ${panY}px) scale(${Z})`;
+  const s = 24 * Z;   // 网格点间距随缩放变化，位置跟随平移
+  scroller.style.backgroundSize = `${s}px ${s}px`;
+  scroller.style.backgroundPosition = `${panX % s}px ${panY % s}px`;
   $('#zoomPct').textContent = Math.round(Z * 100) + '%';
 }
 
@@ -621,12 +620,11 @@ function applyZoom() {
 function zoomAt(clientX, clientY, newZ) {
   const r = scroller.getBoundingClientRect();
   const vx = clientX - r.left, vy = clientY - r.top;
-  const bx = (scroller.scrollLeft + vx) / Z;   // 锚点的画布坐标
-  const by = (scroller.scrollTop + vy) / Z;
+  const bx = (vx - panX) / Z, by = (vy - panY) / Z;   // 锚点的画布坐标
   Z = clamp(newZ, Z_MIN, Z_MAX);
-  applyZoom();
-  scroller.scrollLeft = bx * Z - vx;
-  scroller.scrollTop = by * Z - vy;
+  panX = vx - bx * Z;
+  panY = vy - by * Z;
+  applyView();
 }
 
 function zoomCenter(newZ) {
@@ -634,7 +632,36 @@ function zoomCenter(newZ) {
   zoomAt(r.left + r.width / 2, r.top + r.height / 2, newZ);
 }
 
-// 双指捏合：缩放比例 = 当前指距 / 起始指距；两指中点移动可同时平移画布
+// 重置视图：100% 并把原点 (0,0) 放回可视区中心
+function resetView() {
+  Z = 1;
+  const trayH = window.innerWidth <= 768 ? $('#sidebar').offsetHeight : 0;
+  panX = scroller.clientWidth / 2;
+  panY = Math.max(0, scroller.clientHeight - trayH) / 2;
+  applyView();
+}
+
+// 拖拽画布空白处平移（电脑鼠标 / 手机单指）
+function startPan(e) {
+  // 注意：不能 preventDefault —— iOS WebKit 会因此吞掉后续 click 事件
+  const sx = e.clientX, sy = e.clientY, ox = panX, oy = panY;
+  const onMove = (ev) => {
+    if (pinchActive) return;   // 双指手势进行中：挂起平移
+    panX = ox + ev.clientX - sx;
+    panY = oy + ev.clientY - sy;
+    applyView();
+  };
+  const finish = () => {
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', finish);
+    document.removeEventListener('pointercancel', finish);
+  };
+  document.addEventListener('pointermove', onMove);
+  document.addEventListener('pointerup', finish);
+  document.addEventListener('pointercancel', finish);
+}
+
+// 双指捏合：缩放比例 = 当前指距 / 起始指距；两指中点移动同时平移画布
 scroller.addEventListener('touchstart', (e) => {
   if (e.touches.length !== 2) return;
   const [a, b] = e.touches;
@@ -643,8 +670,8 @@ scroller.addEventListener('touchstart', (e) => {
   pinch = {
     d0: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1,
     z0: Z,
-    ax: (scroller.scrollLeft + (a.clientX + b.clientX) / 2 - r.left) / Z,
-    ay: (scroller.scrollTop + (a.clientY + b.clientY) / 2 - r.top) / Z,
+    ax: (((a.clientX + b.clientX) / 2 - r.left) - panX) / Z,
+    ay: (((a.clientY + b.clientY) / 2 - r.top) - panY) / Z,
   };
   e.preventDefault();   // 接管双指手势，阻止浏览器滚动/页面缩放
 }, { passive: false });
@@ -654,10 +681,10 @@ scroller.addEventListener('touchmove', (e) => {
   const [a, b] = e.touches;
   const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1;
   Z = clamp(pinch.z0 * d / pinch.d0, Z_MIN, Z_MAX);
-  applyZoom();
   const r = scroller.getBoundingClientRect();
-  scroller.scrollLeft = pinch.ax * Z - ((a.clientX + b.clientX) / 2 - r.left);
-  scroller.scrollTop = pinch.ay * Z - ((a.clientY + b.clientY) / 2 - r.top);
+  panX = ((a.clientX + b.clientX) / 2 - r.left) - pinch.ax * Z;
+  panY = ((a.clientY + b.clientY) / 2 - r.top) - pinch.ay * Z;
+  applyView();
   e.preventDefault();
 }, { passive: false });
 
@@ -668,18 +695,23 @@ function pinchEnd(e) {
 scroller.addEventListener('touchend', pinchEnd, { passive: true });
 scroller.addEventListener('touchcancel', pinchEnd, { passive: true });
 
-// 电脑：Ctrl/⌘ + 滚轮缩放（以光标为锚点）
+// 电脑：滚轮平移画布，Ctrl/⌘+滚轮缩放（以光标为锚点）
 scroller.addEventListener('wheel', (e) => {
-  if (!(e.ctrlKey || e.metaKey)) return;
   e.preventDefault();
-  const k = e.deltaMode === 1 ? 0.066 : 0.002;
-  zoomAt(e.clientX, e.clientY, Z * Math.exp(-e.deltaY * k));
+  if (e.ctrlKey || e.metaKey) {
+    const k = e.deltaMode === 1 ? 0.066 : 0.002;
+    zoomAt(e.clientX, e.clientY, Z * Math.exp(-e.deltaY * k));
+  } else {
+    panX -= e.deltaX;
+    panY -= e.deltaY;
+    applyView();
+  }
 }, { passive: false });
 
 // 缩放控件（onTap 兼容微信内置浏览器）
 onTap($('#zoomIn'), () => zoomCenter(Z * 1.25));
 onTap($('#zoomOut'), () => zoomCenter(Z / 1.25));
-onTap($('#zoomReset'), () => zoomCenter(1));
+onTap($('#zoomReset'), resetView);
 
 // ========== 左侧组件栏：拖拽 / 点击添加 ==========
 (function initSidebarDrag() {
@@ -727,8 +759,9 @@ onTap($('#zoomReset'), () => zoomCenter(1));
         if (dragging) {
           // 拖拽释放：必须落在画布上、且不在底部抽屉范围内，才算有效放置
           // （否则手指轻点的几像素抖动会把圆圈丢在抽屉背后，看起来像没反应）
+          // 无限画布：释放在画布可视区任意位置都算有效（#canvasScroll 不在抽屉内，无需再排除）
           const over = document.elementFromPoint(ev.clientX, ev.clientY);
-          if (pointOnBoard(ev) && !(over && over.closest('#sidebar'))) {
+          if (over && over.closest('#canvasScroll')) {
             suppressClickUntil = Date.now() + 400;   // 拖拽成功后抑制随之而来的 click
             const p = boardPoint(ev);
             addCircle(p.x, p.y, mm);
@@ -773,28 +806,28 @@ onTap($('#trayToggle'), () => {
 });
 
 // ========== 画布：选中 / 移动 / 取消选中 ==========
-board.addEventListener('pointerdown', (e) => {
+scroller.addEventListener('pointerdown', (e) => {
   if (e.button !== 0) return;
-  const shapeEl = e.target.closest('.shape');
+  const shapeEl = e.target.closest && e.target.closest('.shape');
   if (shapeEl) {
     const id = Number(shapeEl.dataset.id);
     select(id);
     startMove(e, id);
-  } else if (e.target === board) {
-    select(null);   // 点击空白处取消选中
+  } else if (e.target === scroller || e.target === board) {
+    startPan(e);   // 拖拽空白处平移画布；轻点空白取消选中由 onTap 处理
   }
 });
 
-// 轻点圆形：选中（onTap 兜底，个别内核不派发 pointer 事件时仍可选中 / 取消选中）
-onTap(board, (e) => {
+// 轻点圆形：选中；轻点空白：取消选中（onTap 兜底，兼容微信内置浏览器）
+onTap(scroller, (e) => {
   const shapeEl = e.target && e.target.closest && e.target.closest('.shape');
   if (shapeEl) select(Number(shapeEl.dataset.id));
-  else if (e.target === board) select(null);
+  else if (e.target === scroller || e.target === board) select(null);
 });
 
 // 双击画布空白处：在落点添加最近使用尺寸的圆形
-board.addEventListener('dblclick', (e) => {
-  if (e.target === board) {
+scroller.addEventListener('dblclick', (e) => {
+  if (e.target === scroller || e.target === board) {
     const p = boardPoint(e);
     addCircle(p.x, p.y, lastMm);
   }
@@ -853,11 +886,12 @@ function showSnapFx(snap) {
   clearSnapFx();
   const tEl = board.querySelector(`.shape[data-id="${snap.t.id}"]`);
   if (tEl) tEl.classList.add('snap-target');
+  // 参考线定位在可视容器上：画布坐标 → 屏幕 = 坐标 * Z + pan
   if (snap.axis === 'h') {
-    guideH.style.top = (snap.t.y + snap.t.d / 2) + 'px';
+    guideH.style.top = (snap.t.y + snap.t.d / 2) * Z + panY + 'px';
     guideH.classList.remove('hidden');
   } else if (snap.axis === 'v') {
-    guideV.style.left = (snap.t.x + snap.t.d / 2) + 'px';
+    guideV.style.left = (snap.t.x + snap.t.d / 2) * Z + panX + 'px';
     guideV.classList.remove('hidden');
   }
 }
@@ -882,11 +916,7 @@ function resolvePosition(c, cx, cy) {
         pushed = true;
       }
     }
-    const nx = clamp(cx - rc, 0, BOARD_W - c.d) + rc;
-    const ny = clamp(cy - rc, 0, BOARD_H - c.d) + rc;
-    if (nx !== cx || ny !== cy) pushed = true;
-    cx = nx; cy = ny;
-    if (!pushed) break;
+    if (!pushed) break;   // 无限画布：无边界约束，只需圆形之间不重叠
   }
   return { cx, cy };
 }
@@ -1021,7 +1051,7 @@ scroller.addEventListener('pointermove', (e) => {
   let pd = 0, te = 0, ck = 0, err = '';
   const mq = window.matchMedia('(max-width: 768px)');
   const update = () => {
-    el.textContent = `v12 · ${window.innerWidth}×${window.innerHeight} · MQ:${mq.matches ? 'Y' : 'N'} · CL:${document.documentElement.classList.contains('mobile') ? 'Y' : 'N'} · pd:${pd} te:${te} ck:${ck}` + (err ? ` · ERR:${err}` : '');
+    el.textContent = `v13 · ${window.innerWidth}×${window.innerHeight} · MQ:${mq.matches ? 'Y' : 'N'} · CL:${document.documentElement.classList.contains('mobile') ? 'Y' : 'N'} · pd:${pd} te:${te} ck:${ck}` + (err ? ` · ERR:${err}` : '');
   };
   document.addEventListener('pointerdown', () => { pd++; update(); }, true);
   document.addEventListener('touchend', () => { te++; update(); }, true);
@@ -1036,7 +1066,7 @@ function addSeed(x, y, mm) {
   circles.push({ id: nextId++, mm, d: mm * MM, x, y, color: colorForSize(mm) });
 }
 (function init() {
-  applyZoom();
+  resetView();   // 初始视图：100%，原点 (0,0) 居中
   const ctr = viewportCenter();
   addSeed(ctr.x - 140, ctr.y - 30, 4);
   addSeed(ctr.x - 40,  ctr.y - 70, 6);
